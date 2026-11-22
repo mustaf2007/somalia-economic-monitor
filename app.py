@@ -85,13 +85,17 @@ kpis=[("GDP","NY.GDP.MKTP.CD","money"),("GDP growth","NY.GDP.MKTP.KD.ZG","pct"),
 for col,(label,code,kind) in zip(st.columns(4),kpis):
     try:
         row=latest(wb_series("SOM",code))
-        if row is None: col.metric(label,"Not available")
+        if row is None:
+            col.metric(label,"No observation")
+            col.caption("World Bank: no non-missing value returned for this indicator.")
         else:
             v=row["value"]
             display=("US$"+f"{v/1e9:,.2f}B") if kind=="money" else (f"{v/1e6:,.2f}M" if kind=="pop" else f"{v:,.2f}%")
-            col.metric(label,display,help=f"Latest available observation: {int(row['year'])}")
-    except Exception:
-        col.metric(label,"Unavailable",help="Public source unavailable; try again later.")
+            col.metric(label,display)
+            col.caption(f"Latest observation: {int(row['year'])} · World Bank")
+    except Exception as e:
+        col.metric(label,"Unavailable")
+        col.caption("World Bank request failed. Refresh or try again later.")
 
 tabs=st.tabs(["Economic monitor","Climate monitor","Development indicators","Sources & methodology"])
 with tabs[0]:
@@ -110,9 +114,20 @@ with tabs[0]:
             except Exception as e: st.warning(f"{country}: {e}")
     if frames:
         data=pd.concat(frames,ignore_index=True)
-        fig=px.line(data,x="year",y="value",color="Country",markers=True,labels={"year":"Year","value":unit})
-        fig.update_layout(template="plotly_white",height=450,legend_title="")
+        fig=px.line(data,x="year",y="value",color="Country",markers=True,
+                     labels={"year":"Observation year","value":unit,"Country":"Country"},
+                     hover_data={"year":True,"value":":.3f","Country":True})
+        fig.update_layout(template="plotly_white",height=450,legend_title="Country",
+                          margin=dict(l=15,r=15,t=25,b=15),hovermode="x unified")
         st.plotly_chart(fig,use_container_width=True)
+        latest_by_country=(data.dropna(subset=["value"]).sort_values("year")
+                           .groupby("Country",as_index=False).tail(1)
+                           .sort_values("Country"))
+        st.caption("Latest available observation by selected country (years may differ):")
+        st.dataframe(latest_by_country[["Country","year","value"]].rename(
+            columns={"year":"Latest year","value":f"Latest value ({unit})"}),
+            use_container_width=True,hide_index=True)
+        st.caption(f"Source: World Bank Indicators API · Indicator code: {code} · Retrieved live from the public API (cached for up to 24 hours).")
         st.dataframe(data.sort_values(["Country","year"],ascending=[True,False]),use_container_width=True,hide_index=True)
         st.download_button("Download selected data (CSV)",data.to_csv(index=False).encode("utf-8"),
                            "somalia_economic_monitor.csv","text/csv")
@@ -190,4 +205,4 @@ with tabs[3]:
 - This independent dashboard is not an official Government of Somalia statistical publication.
 """)
 st.divider()
-st.caption("Somalia Economic Monitor · Version 1.0 · Open public data · No authentication required")
+st.caption("Somalia Economic Monitor · Version 1.1 · Open public data · No authentication required")
